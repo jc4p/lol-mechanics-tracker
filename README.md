@@ -9,6 +9,8 @@ to sit on my second monitor while I play LoL, and track me on some metrics that 
 Currently this repo is in the prototyping stage. What I have is a C# app which uses a lightweight DirectX API to record my
 primary monitor's screen[1], look at the top status bar in LoL, and reecord my "creep score", the number of small minions I've killed.
 
+I'm trying to be pretty open, so current plans can be found in [0.1 Milestone](https://github.com/jc4p/lol-mechanics-tracker/issues/1).
+
 In this image you can see the "32" circled in the gray app on the left (this code) matches the "32" on the top-right. 
 
 ![screencap](https://pbs.twimg.com/media/Cll8CAZVEAEXF0U.jpg:large)

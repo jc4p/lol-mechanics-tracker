@@ -7,7 +7,7 @@ little stuff that you do to gain small wins, which hopefully later on build up t
 to sit on my second monitor while I play LoL, and track me on some metrics that apply to those small wins.
 
 Currently this repo is in the prototyping stage. What I have is a C# app which uses a lightweight DirectX API to record my
-primary monitor's screen<sup>[1](http://www.virtualdub.org/blog/pivot/entry.php?id=356)</sup>, look at the top status bar in LoL, and reecord my "creep score", the number of small minions I've killed.
+primary monitor's screen<sup>[1](http://www.virtualdub.org/blog/pivot/entry.php?id=356)</sup>, look at the top status bar in LoL, and records my "creep score", the number of small minions I've killed.
 
 I'm trying to be pretty open, so current plans can be found in [0.1 Milestone](https://github.com/jc4p/lol-mechanics-tracker/issues/1).
 

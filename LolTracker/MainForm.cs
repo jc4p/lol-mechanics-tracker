@@ -21,6 +21,7 @@ namespace LolTracker
         private TesseractEngine ocrEng;
 
         private bool isProcessing = false;
+        private Timer cooloffTimer = null;
         private int currentCS;
         private int currentMin;
         private int currentSec;
@@ -60,12 +61,12 @@ namespace LolTracker
             if (isRunning)
             {
                 lolStatusLabel.Text = "Running";
-                if (!dxManager.IsRecording())
-                    dxManager.StartRecording((bmp, moved, dirty) => onFrameUpdate(bmp, moved, dirty));
+                if (!dxManager.IsRecording)
+                    dxManager.StartRecording(() => onFrameUpdate());
             } else
             {
                 lolStatusLabel.Text = "Not Running";
-                if (dxManager.IsRecording())
+                if (dxManager.IsRecording)
                     dxManager.StopRecording();
                 currentCS = 0;
                 currentMin = 0;
@@ -73,14 +74,17 @@ namespace LolTracker
             }
         }
 
-        private void onFrameUpdate(Bitmap bmp, DirectXManager.MovedRegion[] movedRegions, DirectXManager.Rect[] dirtyRects)
+        private async void onFrameUpdate()
         {
+            Console.WriteLine("onFrameUpdate");
+            Console.WriteLine("Removing frame update info from queue");
+            var update = dxManager.GetProcessor().Take();
             // LoL updates by updating the entire screen at the same time, so anything else we know isn't actually LoL
-            if (dirtyRects.Length == 1 && dirtyRects[0].width == bmp.Width && !isProcessing)
+            if (update.DirtyRects.Length == 1 && update.DirtyRects[0].width == update.LastAcquiredFrame.Width && !isProcessing)
             {
                 try {
                     // First off trim to just the top-right corner
-                    var trimmed = bmp.Clone(new Rectangle((int)(bmp.Width * 0.9), 0, (int)(bmp.Width * 0.1), 40), bmp.PixelFormat);
+                    var trimmed = update.LastAcquiredFrame.Clone(new Rectangle((int)(update.LastAcquiredFrame.Width * 0.9), 0, (int)(update.LastAcquiredFrame.Width * 0.1), 40), update.LastAcquiredFrame.PixelFormat);
 
                     // Then let's make it a Pix and easier to OCR
                     var img = PixConverter.ToPix(trimmed);
@@ -143,6 +147,9 @@ namespace LolTracker
                     Console.WriteLine(e);
                 }
             }
+
+            await Task.Delay(2000);
+            dxManager.GetRecorder().Add(update);
         }
 
         public bool IsProcessRunningByWindowTitle(string name)

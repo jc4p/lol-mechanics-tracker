@@ -26,14 +26,12 @@ namespace LolTracker
         private SharpDX.DataStream screenDataStream;
         private Surface screenSurface;
 
-        private bool recording = false;
+        public bool IsRecording { get; private set; }
         private Task recordingTask;
+        private OnFrameReady frameListener;
 
-        private Bitmap LastAcquiredFrame;
-        private MovedRegion[] MovedRegions;
-        private Rect[] DirtyRects;
-
-        private OnFrameReady updateListener;
+        private BlockingCollection<FrameUpdateInfo> recordingQueue = new BlockingCollection<FrameUpdateInfo>(1);
+        private BlockingCollection<FrameUpdateInfo> processingQueue = new BlockingCollection<FrameUpdateInfo>(1);
 
         public Rect GetMainMonitorSize()
         {
@@ -87,44 +85,49 @@ namespace LolTracker
             duplicatedOutput = output.DuplicateOutput(d3dDevice);
         }
 
-        public bool IsRecording()
+        public BlockingCollection<FrameUpdateInfo> GetRecorder()
         {
-            return recording;
+            return recordingQueue;
+        }
+
+        public BlockingCollection<FrameUpdateInfo> GetProcessor()
+        {
+            return processingQueue;
 
         }
         public void StartRecording(OnFrameReady listener)
         {
-            updateListener = listener;
-            recording = true;
+            Console.WriteLine("StartRecording");
+            IsRecording = true;
+            frameListener = listener;
+            if (recordingQueue.Count == 0)
+                recordingQueue.Add(new FrameUpdateInfo());
             recordingTask = new Task(new Action(Record));
             recordingTask.Start();
         }
 
         public void StopRecording()
         {
-            updateListener = null;
-            recording = false;
+            Console.WriteLine("StopRecording");
+            IsRecording = false;
         }
 
         private void Record()
         {
-            int i = 0;
-            Stopwatch sw = new Stopwatch();
-            sw.Start();
-
-            while (recording)
+            while (IsRecording)
             {
-                i++;
+                FrameUpdateInfo update = recordingQueue.Take();
                 OutputDuplicateFrameInformation duplicateFrameInformation;
                 try
                 {
+                    Console.WriteLine("Trying to acquire a frame");
                     duplicatedOutput.AcquireNextFrame(1000, out duplicateFrameInformation, out screenResource);
                 }
                 catch (SharpDX.SharpDXException e)
                 {
+                    Console.WriteLine("Failed to acquire frame: {0}", e);
                     if (e.ResultCode.Code == ResultCode.WaitTimeout.Result.Code)
                     {
-                        i--;
                         // keep retrying
                         continue;
                     }
@@ -136,24 +139,26 @@ namespace LolTracker
                     }
                 }
 
+                Console.WriteLine("Got frame");
+
                 if (duplicateFrameInformation.TotalMetadataBufferSize > 0)
                 {
                     // get move rects
                     int moveRectsLen = 0;
                     OutputDuplicateMoveRectangle[] moveRects = new OutputDuplicateMoveRectangle[duplicateFrameInformation.TotalMetadataBufferSize];
                     duplicatedOutput.GetFrameMoveRects(moveRects.Length, moveRects, out moveRectsLen);
-                    MovedRegions = new MovedRegion[moveRectsLen / Marshal.SizeOf(typeof(OutputDuplicateMoveRectangle))];
-                    for (int j = 0; j < MovedRegions.Length; j++)
+                    update.MovedRegions = new MovedRegion[moveRectsLen / Marshal.SizeOf(typeof(OutputDuplicateMoveRectangle))];
+                    for (int i = 0; i < update.MovedRegions.Length; i++)
                     {
-                        MovedRegions[j] = new MovedRegion
+                        update.MovedRegions[i] = new MovedRegion
                         {
-                            start = new Point(moveRects[j].SourcePoint.X, moveRects[j].SourcePoint.Y),
+                            start = new Point(moveRects[i].SourcePoint.X, moveRects[i].SourcePoint.Y),
                             to = new Rect()
                             {
-                                left = moveRects[j].DestinationRect.Left,
-                                top = moveRects[j].DestinationRect.Top,
-                                right = moveRects[j].DestinationRect.Right,
-                                bottom = moveRects[j].DestinationRect.Bottom
+                                left = moveRects[i].DestinationRect.Left,
+                                top = moveRects[i].DestinationRect.Top,
+                                right = moveRects[i].DestinationRect.Right,
+                                bottom = moveRects[i].DestinationRect.Bottom
                             }
                         };
                     }
@@ -162,22 +167,22 @@ namespace LolTracker
                     int dirtyRectsLen = 0;
                     SharpDX.Mathematics.Interop.RawRectangle[] dirtyRects = new SharpDX.Mathematics.Interop.RawRectangle[duplicateFrameInformation.TotalMetadataBufferSize];
                     duplicatedOutput.GetFrameDirtyRects(dirtyRects.Length, dirtyRects, out dirtyRectsLen);
-                    DirtyRects = new Rect[dirtyRectsLen / Marshal.SizeOf(typeof(SharpDX.Mathematics.Interop.RawRectangle))];
-                    for (int j = 0; j < DirtyRects.Length; j++)
+                    update.DirtyRects = new Rect[dirtyRectsLen / Marshal.SizeOf(typeof(SharpDX.Mathematics.Interop.RawRectangle))];
+                    for (int i = 0; i < update.DirtyRects.Length; i++)
                     {
-                        DirtyRects[j] = new Rect
+                        update.DirtyRects[i] = new Rect
                         {
-                            left = dirtyRects[j].Left,
-                            top = dirtyRects[j].Top,
-                            right = dirtyRects[j].Right,
-                            bottom = dirtyRects[j].Bottom
+                            left = dirtyRects[i].Left,
+                            top = dirtyRects[i].Top,
+                            right = dirtyRects[i].Right,
+                            bottom = dirtyRects[i].Bottom
                         };
                     }
                 }
                 else
                 {
-                    MovedRegions = new MovedRegion[0];
-                    DirtyRects = new Rect[0];
+                    update.MovedRegions = new MovedRegion[0];
+                    update.DirtyRects = new Rect[0];
                 }
 
                 // copy resource into memory that can be accessed by the CPU
@@ -188,15 +193,15 @@ namespace LolTracker
                 screenSurface.Map(MapFlags.Read, out screenDataStream);
 
                 // Read it!
-                if (LastAcquiredFrame == null)
+                if (update.LastAcquiredFrame == null)
                 {
-                    LastAcquiredFrame = new Bitmap(screenTexture.Description.Width, screenTexture.Description.Height, PixelFormat.Format32bppArgb);
+                    update.LastAcquiredFrame = new Bitmap(screenTexture.Description.Width, screenTexture.Description.Height, PixelFormat.Format32bppArgb);
                 }
-                var BoundsRect = new Rectangle(0, 0, LastAcquiredFrame.Width, LastAcquiredFrame.Height);
-                BitmapData bmpData = LastAcquiredFrame.LockBits(BoundsRect, ImageLockMode.WriteOnly, LastAcquiredFrame.PixelFormat);
+                var BoundsRect = new Rectangle(0, 0, update.LastAcquiredFrame.Width, update.LastAcquiredFrame.Height);
+                BitmapData bmpData = update.LastAcquiredFrame.LockBits(BoundsRect, ImageLockMode.WriteOnly, update.LastAcquiredFrame.PixelFormat);
 
-                screenDataStream.Read(bmpData.Scan0, 0, bmpData.Stride * LastAcquiredFrame.Height);
-                LastAcquiredFrame.UnlockBits(bmpData);
+                screenDataStream.Read(bmpData.Scan0, 0, bmpData.Stride * update.LastAcquiredFrame.Height);
+                update.LastAcquiredFrame.UnlockBits(bmpData);
 
                 // free resources
                 screenDataStream.Close();
@@ -206,25 +211,14 @@ namespace LolTracker
                     screenResource.Dispose();
                 duplicatedOutput.ReleaseFrame();
 
-                if (updateListener != null)
-                {
-                    updateListener(LastAcquiredFrame, MovedRegions, DirtyRects);
-                }
-
-                // print how many frames we could process within the last second
-                // note that this also depends on how often windows will &gt;need&lt; to redraw the interface
-                if (sw.ElapsedMilliseconds > 1000)
-                {
-                    //Console.WriteLine(i + "fps");
-                    sw.Reset();
-                    sw.Start();
-                    i = 0;
-                }
+                // Add to the queue, and we'll wait until we're needed again (hopefully)
+                Console.WriteLine("Adding frame info to queue");
+                processingQueue.Add(update);
+                frameListener();
             }
         }
 
-        public delegate void OnFrameReady(Bitmap frame, MovedRegion[] movedRegions, Rect[] dirtyRects);
-        public delegate void OnFrameError();
+        public delegate void OnFrameReady();
 
         [DllImport("user32")]
         private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lpRect, MonitorEnumProc callback, int dwData);
@@ -239,6 +233,13 @@ namespace LolTracker
         }
 
         private delegate bool MonitorEnumProc(IntPtr hDesktop, IntPtr hdc, ref Rect pRect, int dwData);
+
+        public class FrameUpdateInfo
+        {
+            public Bitmap LastAcquiredFrame { get; set; }
+            public MovedRegion[] MovedRegions { get; set; }
+            public Rect[] DirtyRects { get; set; }
+        }
 
         public struct MovedRegion
         {

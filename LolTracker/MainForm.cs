@@ -1,16 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Direct3DCapture;
 using Tesseract;
+using EasyHook;
 
 namespace LolTracker
 {
@@ -18,6 +14,7 @@ namespace LolTracker
     {
         private Timer lolCheckTimer;
         private DirectXManager dxManager;
+        private CaptureProcess captureProcess;
         private TesseractEngine ocrEng;
 
         private bool isProcessing = false;
@@ -37,8 +34,12 @@ namespace LolTracker
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            dxManager.Init(Handle);
+            Process process = GetRunningProcessByWindowTitle("Battle.net");
 
+            var captureInterface = new CaptureInterface();
+            captureInterface.RemoteMessage += (message) => Debug.WriteLine(message);
+            captureProcess = new CaptureProcess(process, captureInterface);
+            
             currentCS = 0;
             currentMin = 0;
             currentSec = 0;
@@ -48,15 +49,18 @@ namespace LolTracker
             lolCheckTimer.Tick += CheckLoLStatus;
             lolCheckTimer.Interval = 5000;
             lolCheckTimer.Start();
-
+            /*
             // Setup Tesseract
             ocrEng = new TesseractEngine(@"./tessdata", "eng", EngineMode.Default);
             ocrEng.SetVariable("tessedit_char_whitelist", " AO:012345789");
+            */
         }
 
         private void CheckLoLStatus(object sender, EventArgs e)
         {
             //var isRunning = IsProcessRunningByWindowTitle("Google Chrome");
+            captureProcess.Interface.BeginGetScreenshot(new Rectangle(0, 0, 800, 600), new TimeSpan(0, 0, 2), ScreenshotCallback);
+            /*
             var isRunning = IsProcessRunningByWindowTitle("League of Legends (TM) Client");
             if (isRunning)
             {
@@ -71,13 +75,22 @@ namespace LolTracker
                 currentCS = 0;
                 currentMin = 0;
                 currentSec = 0;
+            } */
+        }
+
+        void ScreenshotCallback(IAsyncResult result)
+        {
+            using (Screenshot screenshot = captureProcess.Interface.EndGetScreenshot(result))
+            {
+                if (screenshot == null)
+                    Debug.WriteLine("Didn't get a screenshot");
+                else
+                    Debug.WriteLine("Got screenshot {0} by {1}", screenshot.Width, screenshot.Height);
             }
         }
 
         private async void onFrameUpdate()
         {
-            Console.WriteLine("onFrameUpdate");
-            Console.WriteLine("Removing frame update info from queue");
             var update = dxManager.GetProcessor().Take();
             // LoL updates by updating the entire screen at the same time, so anything else we know isn't actually LoL
             if (update.DirtyRects.Length == 1 && update.DirtyRects[0].width == update.LastAcquiredFrame.Width && !isProcessing)
@@ -154,15 +167,21 @@ namespace LolTracker
 
         public bool IsProcessRunningByWindowTitle(string name)
         {
+            return GetRunningProcessByWindowTitle(name) == null;
+        }
+
+        public Process GetRunningProcessByWindowTitle(string name)
+        {
             foreach (Process clsProcess in Process.GetProcesses())
             {
                 if (clsProcess.MainWindowTitle.Contains(name))
                 {
-                    return true;
+                    return clsProcess;
                 }
             }
 
-            return false;
+            return null;
+
         }
     }
 }

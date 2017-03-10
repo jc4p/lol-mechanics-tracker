@@ -28,7 +28,7 @@ namespace LolTracker
 
         public bool IsRecording { get; private set; }
         private Task recordingTask;
-        private OnFrameReady frameListener;
+        private ScreenCaptureDelegate.OnFrameReady frameListener;
 
         private BlockingCollection<FrameUpdateInfo> recordingQueue = new BlockingCollection<FrameUpdateInfo>(1);
         private BlockingCollection<FrameUpdateInfo> processingQueue = new BlockingCollection<FrameUpdateInfo>(1);
@@ -61,7 +61,8 @@ namespace LolTracker
 
 
             Factory1 factory = new Factory1();
-            D3D11.Device.CreateWithSwapChain(DriverType.Hardware, D3D11.DeviceCreationFlags.None, swapChainDesc, out d3dDevice, out swapChain);
+            
+            D3D11.Device.CreateWithSwapChain(factory.Adapters[0], D3D11.DeviceCreationFlags.SingleThreaded, new FeatureLevel[] { FeatureLevel.Level_11_1 }, swapChainDesc, out d3dDevice, out swapChain);
             d3dDeviceContext = d3dDevice.ImmediateContext;
 
             // CPU accessible texture with _STAGING
@@ -95,9 +96,8 @@ namespace LolTracker
             return processingQueue;
 
         }
-        public void StartRecording(OnFrameReady listener)
+        public void StartRecording(ScreenCaptureDelegate.OnFrameReady listener)
         {
-            Console.WriteLine("StartRecording");
             IsRecording = true;
             frameListener = listener;
             if (recordingQueue.Count == 0)
@@ -108,7 +108,6 @@ namespace LolTracker
 
         public void StopRecording()
         {
-            Console.WriteLine("StopRecording");
             IsRecording = false;
         }
 
@@ -120,7 +119,6 @@ namespace LolTracker
                 OutputDuplicateFrameInformation duplicateFrameInformation;
                 try
                 {
-                    Console.WriteLine("Trying to acquire a frame");
                     duplicatedOutput.AcquireNextFrame(1000, out duplicateFrameInformation, out screenResource);
                 }
                 catch (SharpDX.SharpDXException e)
@@ -138,8 +136,6 @@ namespace LolTracker
                         continue;
                     }
                 }
-
-                Console.WriteLine("Got frame");
 
                 if (duplicateFrameInformation.TotalMetadataBufferSize > 0)
                 {
@@ -191,7 +187,7 @@ namespace LolTracker
                 screenSurface = screenTexture.QueryInterface<Surface>();
                 // map the resource to access it
                 screenSurface.Map(MapFlags.Read, out screenDataStream);
-
+                
                 // Read it!
                 if (update.LastAcquiredFrame == null)
                 {
@@ -202,7 +198,7 @@ namespace LolTracker
 
                 screenDataStream.Read(bmpData.Scan0, 0, bmpData.Stride * update.LastAcquiredFrame.Height);
                 update.LastAcquiredFrame.UnlockBits(bmpData);
-
+                
                 // free resources
                 screenDataStream.Close();
                 screenSurface.Unmap();
@@ -212,13 +208,10 @@ namespace LolTracker
                 duplicatedOutput.ReleaseFrame();
 
                 // Add to the queue, and we'll wait until we're needed again (hopefully)
-                Console.WriteLine("Adding frame info to queue");
                 processingQueue.Add(update);
                 frameListener();
             }
         }
-
-        public delegate void OnFrameReady();
 
         [DllImport("user32")]
         private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lpRect, MonitorEnumProc callback, int dwData);
